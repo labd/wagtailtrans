@@ -186,7 +186,9 @@ class TranslatablePageMixin:
         return TranslatablePageItem.objects.filter(page=self, canonical_page__isnull=True).exists() and self.has_translations
 
     def serve(self, request, *args, **kwargs):
-        activate(self.language.code)
+        language = self.language
+        if language:
+            activate(language.code)
         return super().serve(request, *args, **kwargs)
 
     def get_admin_display_title(self):

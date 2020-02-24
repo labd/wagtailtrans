@@ -167,20 +167,17 @@ def edit_in_language_items(page, page_perms, is_parent=False):
     language they prefer.
 
     """
-    # TODO: Fix for mixin
-    return
-    
     other_languages = (
         page.specific
-        .get_translations(only_live=False)
-        .exclude(pk=page.pk)
+        .get_translatable_page_items(only_live=False)
+        .select_related('page')
         .select_related('language')
         .order_by('language__position')
     )
 
     for prio, language_page in enumerate(other_languages):
-        edit_url = reverse('wagtailadmin_pages:edit', args=(language_page.pk,))
-        return_page = language_page.canonical_page or language_page
+        edit_url = reverse('wagtailadmin_pages:edit', args=(language_page.page.pk,))
+        return_page = language_page.canonical_page or language_page.page
         next_url = reverse('wagtailadmin_explore', args=(return_page.get_parent().pk,))
 
         yield widgets.Button(

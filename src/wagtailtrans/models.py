@@ -259,17 +259,16 @@ class TranslatablePageMixin:
         """
         super().move(target, pos)
 
-        # TODO: Fix when no language is set (new site)
+        if self.language:
+            if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
+                site = self.get_site()
+                lang_settings = SiteLanguages.for_site(site)
+                is_default = lang_settings.default_language == self.language
+            else:
+                is_default = self.language.is_default
 
-        if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
-            site = self.get_site()
-            lang_settings = SiteLanguages.for_site(site)
-            is_default = lang_settings.default_language == self.language
-        else:
-            is_default = self.language.is_default
-
-        if not suppress_sync and get_wagtailtrans_setting('SYNC_TREE') and is_default:
-            self.move_translated_pages(canonical_target=target, pos=pos)
+            if not suppress_sync and get_wagtailtrans_setting('SYNC_TREE') and is_default:
+                self.move_translated_pages(canonical_target=target, pos=pos)
 
     def move_translated_pages(self, canonical_target, pos=None):
         """Move only the translated pages of this instance (not self).
@@ -400,7 +399,7 @@ class TranslatableSiteRootPage(Page):
         try:
             translation = candidates.get()
             return redirect(translation.page.url)
-        except TranslatablePage.DoesNotExist:
+        except TranslatablePageItem.DoesNotExist:
             raise Http404
 
 

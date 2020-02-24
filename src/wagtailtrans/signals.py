@@ -28,7 +28,7 @@ def synchronize_trees(page, created=False):
     """Synchronize the translation trees when
     a TranslatablePageMixin is created.
 
-    :param instance: TranslatablePageMixin instance
+    :param page: TranslatablePageMixin instance
     :param created: Page created True of False
 
     """
@@ -62,18 +62,17 @@ def synchronize_trees(page, created=False):
 
 
 @disable_for_loaddata
-def synchronize_deletions(sender, instance, **kwargs):
+def synchronize_deletions(page, **kwargs):
     """We use pre_delete because when sync is disabled the foreign_key on
     canonical pages on_delete is set_null.
 
-    :param sender: Sender model
-    :param instance: TranslatablePage Instance
+    :param page: TranslatablePageMixin Instance
     :param kwargs: kwargs
 
     """
-    language = getattr(instance, 'language', False)
-    if language and instance.is_canonical:
-        instance.get_translations(only_live=False).delete()
+    language = getattr(page, 'language', False)
+    if language and page.is_canonical:
+        page.get_translations(only_live=False).delete()
 
 
 def create_new_language_tree_for_site(site, language):
@@ -148,7 +147,7 @@ def create_language_permissions_and_group(sender, instance, **kwargs):
     create_group_permissions(group, instance)
 
 
-def force_parent_language(page, parent):
+def force_parent_language(sender, page, parent, **kwargs):
     """Force the initial language of the first page, before creating..
 
     When adding a homepage to a site, the initial language should be set.
@@ -177,8 +176,8 @@ def register_signal_handlers():
 
     """
     # TODO: Make this optional via settings
-    # post_save.connect(create_language_permissions_and_group, sender=Language)
-    # init_new_page.connect(force_parent_language)
+    post_save.connect(create_language_permissions_and_group, sender=Language)
+    init_new_page.connect(force_parent_language)
     
     pass
 

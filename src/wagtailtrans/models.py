@@ -143,7 +143,7 @@ class TranslatablePageItem(models.Model):
     page = models.ForeignKey(
         "wagtailcore.Page",
         related_name="+",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         null=True,
         blank=True,
     )
@@ -157,7 +157,7 @@ class TranslatablePageItem(models.Model):
     language = models.ForeignKey(
         Language,
         related_name="translatable_page_items",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         default=_language_default
     )
 
@@ -175,7 +175,6 @@ class TranslatablePageMixin:
 
     @property
     def translatable_page_item(self):
-        # TODO: Fix to cached_property
         return TranslatablePageItem.objects.filter(page=self).first()
 
     @cached_property
@@ -232,13 +231,13 @@ class TranslatablePageMixin:
         if copy_fields:
             kwargs = {'update_attrs': update_attrs}
             if parent != self.get_parent():
-                kwargs['to'] = parent
+                kwargs['to'] = parent.page
 
             new_page = self.copy(**kwargs)
         else:
             model_class = self.content_type.model_class()
             new_page = model_class(**update_attrs)
-            parent.add_child(instance=new_page)
+            parent.page.add_child(instance=new_page)
 
         TranslatablePageItem.objects.create(
             page=new_page,
@@ -279,17 +278,52 @@ class TranslatablePageMixin:
         """
         translations = self.get_translations(only_live=False)
 
-        if getattr(canonical_target, 'canonical_page', False):
-            canonical_target = canonical_target.canonical_page
+        if canonical_target.translatable_page_item and getattr(canonical_target.translatable_page_item, 'canonical_page', False):
+            canonical_target = canonical_target.translatable_page_item.canonical_page
 
         for page in translations:
-            # get target because at this point we assume the tree is in sync.
-            target = TranslatablePage.objects.filter(
+            # Get target because at this point we assume the tree is in sync.
+            target = TranslatablePageItem.objects.filter(
                 Q(language=page.language),
-                Q(canonical_page=canonical_target) | Q(pk=canonical_target.pk)
+                Q(canonical_page=canonical_target) | Q(page=canonical_target)
             ).get()
 
-            page.move(target=target, pos=pos, suppress_sync=True)
+            page.move(target=target.page, pos=pos, suppress_sync=True)
+
+    def get_translatable_page_items(self, only_live=True, include_self=False):
+        """Get all translatable page items of this page.
+
+        :param only_live: Boolean to filter on live pages & languages.
+        :return: TranslatablePageItem instance
+
+        """
+        items = TranslatablePageItem.objects.filter(
+            Q(canonical_page=self) |
+            Q(page=self)
+        )
+
+        if not include_self:
+            items = items.exclude(page=self)
+
+        if only_live:
+            items = items.filter(page__live=True).filter(language__live=True)
+
+        return items
+
+    def get_translations(self, only_live=True, include_self=False):
+        """Get all translations of this page.
+
+        This page itself is not included in the result, all pages
+        are sorted by the language position.
+
+        :param only_live: Boolean to filter on live pages & languages.
+        :return: Page instance
+
+        """
+        items = self.get_translatable_page_items(only_live=only_live, include_self=include_self).values_list('pk', flat=True)
+        translations = Page.objects.filter(pk__in=items)
+
+        return translations
 
     def get_translation_parent(self, language):
         site = self.get_site()
@@ -335,27 +369,6 @@ class TranslatablePage(Page):
     ]
 
     base_form_class = AdminTranslatablePageForm
-
-    def get_translations(self, only_live=True, include_self=False):
-        """Get all translations of this page.
-
-        This page itself is not included in the result, all pages
-        are sorted by the language position.
-
-        :param only_live: Boolean to filter on live pages & languages.
-        :return: TranslatablePage instance
-
-        """
-        canonical_page_id = self.canonical_page_id or self.pk
-        translations = TranslatablePage.objects.filter(Q(canonical_page=canonical_page_id) | Q(pk=canonical_page_id))
-
-        if not include_self:
-            translations = translations.exclude(pk=self.pk)
-
-        if only_live:
-            translations = translations.live().filter(language__live=True)
-
-        return translations
 
     class Meta:
         verbose_name = _('Translatable page')

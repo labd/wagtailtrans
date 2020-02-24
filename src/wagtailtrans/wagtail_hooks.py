@@ -59,6 +59,8 @@ def synchronize_page_move(request, page):
 @hooks.register('after_delete_page')
 def synchronize_page_delete(request, page):
     print("Wagtailtrans:", "delete", page)
+    if hasattr(page, 'is_canonical'):
+        signals.synchronize_deletions(page, created=True)
 
 
 @hooks.register('register_admin_urls')

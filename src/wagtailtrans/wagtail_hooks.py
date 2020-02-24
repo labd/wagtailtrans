@@ -28,11 +28,6 @@ class LanguageModelAdmin(ModelAdmin):
 modeladmin_register(LanguageModelAdmin)
 
 
-@hooks.register('before_create_page')
-def before_create_page(request, parent_page, page_class):
-    pass
-
-
 @hooks.register('after_create_page')
 def synchronize_page_create(request, page):
     if hasattr(page, 'create_translation'):
@@ -48,7 +43,7 @@ def synchronize_page_edit(request, page):
 @hooks.register('before_delete_page')
 def mark_translations_for_deletion(request, page):
    if hasattr(page, 'is_canonical') and page.is_canonical:
-       # Cache pages to be deleted as all refences are already delete when
+       # Cache pages to be deleted as all references are already deleted when
        # after_delete_page is triggered
        page._marked_for_deletion = True
        page._translation_ids = list(page.get_translations(only_live=False).values_list('pk', flat=True))

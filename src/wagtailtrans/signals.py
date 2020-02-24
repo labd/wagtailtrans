@@ -61,20 +61,6 @@ def synchronize_trees(page, created=False):
         page.create_translation(language=lang, copy_fields=True)
 
 
-@disable_for_loaddata
-def synchronize_deletions(page, **kwargs):
-    """We use pre_delete because when sync is disabled the foreign_key on
-    canonical pages on_delete is set_null.
-
-    :param page: TranslatablePageMixin Instance
-    :param kwargs: kwargs
-
-    """
-    language = getattr(page, 'language', False)
-    if language and page.is_canonical:
-        page.get_translations(only_live=False).delete()
-
-
 def create_new_language_tree_for_site(site, language):
     """Create a new language tree for a specific site.
 
@@ -87,11 +73,11 @@ def create_new_language_tree_for_site(site, language):
         if get_wagtailtrans_setting('LANGUAGES_PER_SITE')
         else Language.objects.default()
     )
-    canonical_home_page = TranslatablePage.objects.filter(pk__in=site_pages, language=default_language).first()
+    canonical_home_page = TranslatablePageItem.objects.filter(page__pk__in=site_pages, language=default_language).first()
     if not canonical_home_page:
         # no pages created yet.
         return
-    descendants = canonical_home_page.get_descendants(inclusive=True)
+    descendants = canonical_home_page.page.get_descendants(inclusive=True)
     for child_page in descendants:
         child_page = child_page.specific
         if hasattr(child_page, 'language') and not child_page.has_translation(language):
@@ -177,7 +163,13 @@ def register_signal_handlers():
     """
     # TODO: Make this optional via settings
     post_save.connect(create_language_permissions_and_group, sender=Language)
-    init_new_page.connect(force_parent_language)
+    # init_new_page.connect(force_parent_language)
+    
+    if get_wagtailtrans_setting('SYNC_TREE'):
+        if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
+            m2m_changed.connect(update_language_trees_for_site, sender=SiteLanguages.other_languages.through)
+        else:
+            post_save.connect(create_new_language_tree, sender=Language)
     
     pass
 

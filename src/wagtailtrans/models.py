@@ -177,13 +177,13 @@ class TranslatablePageMixin:
     def translatable_page_item(self):
         return TranslatablePageItem.objects.filter(page=self).first()
 
-    @cached_property
+    @property
     def has_translations(self):
-        return self.translations.exists()
+        return TranslatablePageItem.objects.filter(canonical_page=self).exists()
 
-    @cached_property
+    @property
     def is_canonical(self):
-        return not self.canonical_page_id and self.has_translations
+        return TranslatablePageItem.objects.filter(page=self, canonical_page__isnull=True).exists() and self.has_translations
 
     def serve(self, request, *args, **kwargs):
         activate(self.language.code)
@@ -231,13 +231,13 @@ class TranslatablePageMixin:
         if copy_fields:
             kwargs = {'update_attrs': update_attrs}
             if parent != self.get_parent():
-                kwargs['to'] = parent.page
+                kwargs['to'] = parent
 
             new_page = self.copy(**kwargs)
         else:
             model_class = self.content_type.model_class()
             new_page = model_class(**update_attrs)
-            parent.page.add_child(instance=new_page)
+            parent.add_child(instance=new_page)
 
         TranslatablePageItem.objects.create(
             page=new_page,
@@ -256,6 +256,8 @@ class TranslatablePageMixin:
 
         """
         super().move(target, pos)
+
+        # TODO: Fix when no language is set (new site)
 
         if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
             site = self.get_site()
@@ -320,7 +322,7 @@ class TranslatablePageMixin:
         :return: Page instance
 
         """
-        items = self.get_translatable_page_items(only_live=only_live, include_self=include_self).values_list('pk', flat=True)
+        items = self.get_translatable_page_items(only_live=only_live, include_self=include_self).values_list('page__pk', flat=True)
         translations = Page.objects.filter(pk__in=items)
 
         return translations
@@ -328,7 +330,7 @@ class TranslatablePageMixin:
     def get_translation_parent(self, language):
         site = self.get_site()
 
-        if not language.has_pages_in_site(site):
+        if not language.has_pages_in_site(site) or not self.language:
             return site.root_page
 
         translation_parent = (
@@ -340,7 +342,10 @@ class TranslatablePageMixin:
             .first()
         )
 
-        return translation_parent
+        if translation_parent:
+            return translation_parent.page
+
+        return None
 
 
 class TranslatablePage(Page):
@@ -351,24 +356,6 @@ class TranslatablePage(Page):
     canonical_page = models.ForeignKey(
         'self', related_name='translations', blank=True, null=True, on_delete=models.SET_NULL)
     language = models.ForeignKey(Language, related_name='pages', on_delete=models.PROTECT, default=_language_default)
-
-    is_creatable = False
-
-    search_fields = Page.search_fields + [
-        FilterField('language_id'),
-    ]
-
-    settings_panels = Page.settings_panels + [
-        MultiFieldPanel(
-            heading=_("Translations"),
-            children=[
-                FieldPanel('language'),
-                PageChooserPanel('canonical_page'),
-            ]
-        )
-    ]
-
-    base_form_class = AdminTranslatablePageForm
 
     class Meta:
         verbose_name = _('Translatable page')

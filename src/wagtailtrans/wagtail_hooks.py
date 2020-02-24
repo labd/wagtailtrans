@@ -7,10 +7,11 @@ from django.utils.translation import ugettext_lazy as _
 from wagtail.admin import widgets
 from wagtail.contrib.modeladmin.options import ModelAdmin, modeladmin_register
 from wagtail.core import hooks
+from wagtail.core.models import Page
 
 from wagtailtrans import signals
 from wagtailtrans.conf import get_wagtailtrans_setting
-from wagtailtrans.models import Language, TranslatablePage
+from wagtailtrans.models import Language, TranslatablePageItem
 from wagtailtrans.urls import translations
 
 
@@ -34,33 +35,29 @@ def before_create_page(request, parent_page, page_class):
 
 @hooks.register('after_create_page')
 def synchronize_page_create(request, page):
-    print("Wagtailtrans:", "create", page)
     if hasattr(page, 'create_translation'):
         signals.synchronize_trees(page, created=True)
 
 
 @hooks.register('after_edit_page')
 def synchronize_page_edit(request, page):
-    print("Wagtailtrans:", "edit", page)
     if hasattr(page, 'create_translation'):
         signals.synchronize_trees(page, created=False)
 
 
-@hooks.register('after_copy_page')
-def synchronize_page_copy(request, page):
-    print("Wagtailtrans:", "copy", page)
-
-
-@hooks.register('after_move_page')
-def synchronize_page_move(request, page):
-    print("Wagtailtrans:", "move", page)
+@hooks.register('before_delete_page')
+def mark_translations_for_deletion(request, page):
+   if hasattr(page, 'is_canonical') and page.is_canonical:
+       # Cache pages to be deleted as all refences are already delete when
+       # after_delete_page is triggered
+       page._marked_for_deletion = True
+       page._translation_ids = list(page.get_translations(only_live=False).values_list('pk', flat=True))
 
 
 @hooks.register('after_delete_page')
 def synchronize_page_delete(request, page):
-    print("Wagtailtrans:", "delete", page)
-    if hasattr(page, 'is_canonical'):
-        signals.synchronize_deletions(page, created=True)
+    if getattr(page, '_marked_for_deletion', False):
+        Page.objects.filter(pk__in=page._translation_ids).delete()
 
 
 @hooks.register('register_admin_urls')
@@ -87,7 +84,7 @@ if not get_wagtailtrans_setting('SYNC_TREE'):
         if not hasattr(page, 'language'):
             return
 
-        if hasattr(page, 'canonical_page') and page.canonical_page:
+        if hasattr(page, 'translatable_page_item') and page.translatable_page_item.canonical_page:
             return
 
         yield widgets.ButtonWithDropdownFromHook(
@@ -109,7 +106,7 @@ if not get_wagtailtrans_setting('SYNC_TREE'):
 
         other_languages = set(Language.objects.live().exclude(pk=exclude_lang.pk).order_by('position'))
 
-        translations = page.get_translations(only_live=False).select_related('language')
+        translations = page.get_translatable_page_items(only_live=False).select_related('language')
         taken_languages = set(t.language for t in translations)
 
         translation_targets = other_languages - taken_languages
@@ -135,9 +132,9 @@ def hide_non_canonical_languages(parent_page, pages, request):
     if parent_page.depth > 1 and get_wagtailtrans_setting('HIDE_TRANSLATION_TREES'):
         return pages.filter(
             pk__in=(
-                TranslatablePage.objects
+                TranslatablePageItem.objects
                 .filter(canonical_page__isnull=True)
-                .values_list('pk', flat=True)
+                .values_list('page__pk', flat=True)
             )
         )
     return pages

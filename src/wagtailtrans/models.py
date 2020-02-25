@@ -142,7 +142,7 @@ def _language_default():
 class TranslatablePageItem(models.Model):
     page = models.ForeignKey(
         "wagtailcore.Page",
-        related_name="+",
+        related_name="translatable_page_item",
         on_delete=models.CASCADE,
         null=True,
         blank=True,

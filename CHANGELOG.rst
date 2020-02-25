@@ -1,7 +1,7 @@
 Changelog
 =========
 
-2.2 (XX-XX-XXXX)
+3.0 (XX-XX-XXXX)
 ----------------
 
 

@@ -110,7 +110,7 @@ class Language(models.Model):
         return force_text(dict(settings.LANGUAGES).get(self.code))
 
     def has_pages_in_site(self, site):
-        return self.pages.filter(path__startswith=site.root_page.path).exists()
+        return TranslatablePageItem.objects.filter(page__path__startswith=site.root_page.path).exists()
 
 
 class AdminTranslatablePageForm(WagtailAdminPageForm):
@@ -139,101 +139,60 @@ def _language_default():
         return default_language.pk
 
 
-class TranslatablePage(Page):
-
-    #: Defined with a unique name, to prevent field clashes..
-    translatable_page_ptr = models.OneToOneField(Page, parent_link=True, related_name='+', on_delete=models.CASCADE)
+class TranslatablePageItem(models.Model):
+    page = models.ForeignKey(
+        "wagtailcore.Page",
+        related_name="translatable_page_item",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
     canonical_page = models.ForeignKey(
-        'self', related_name='translations', blank=True, null=True, on_delete=models.SET_NULL)
-    language = models.ForeignKey(Language, related_name='pages', on_delete=models.PROTECT, default=_language_default)
+        "wagtailcore.Page",
+        related_name="+",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+    language = models.ForeignKey(
+        Language,
+        related_name="translatable_page_items",
+        on_delete=models.CASCADE,
+        default=_language_default
+    )
 
-    is_creatable = False
+    class Meta:
+        unique_together = [("page", "canonical_page", "language")]
 
-    search_fields = Page.search_fields + [
-        FilterField('language_id'),
-    ]
 
-    settings_panels = Page.settings_panels + [
-        MultiFieldPanel(
-            heading=_("Translations"),
-            children=[
-                FieldPanel('language'),
-                PageChooserPanel('canonical_page'),
-            ]
-        )
-    ]
+class TranslatablePageMixin:
+    @property
+    def language(self):
+        item = self.translatable_page_item
+        if item:
+            return item.language
+        return None
 
-    base_form_class = AdminTranslatablePageForm
+    @property
+    def translatable_page_item(self):
+        return TranslatablePageItem.objects.filter(page=self).first()
+
+    @property
+    def has_translations(self):
+        return TranslatablePageItem.objects.filter(canonical_page=self).exists()
+
+    @property
+    def is_canonical(self):
+        return TranslatablePageItem.objects.filter(page=self, canonical_page__isnull=True).exists() and self.has_translations
+
+    def serve(self, request, *args, **kwargs):
+        language = self.language
+        if language:
+            activate(language.code)
+        return super().serve(request, *args, **kwargs)
 
     def get_admin_display_title(self):
         return "{} ({})".format(super().get_admin_display_title(), self.language)
-
-    def serve(self, request, *args, **kwargs):
-        activate(self.language.code)
-        return super().serve(request, *args, **kwargs)
-
-    def move(self, target, pos=None, suppress_sync=False):
-        """Move the page to another target.
-
-        :param target: the new target to move the page to
-        :param pos: position of the page in the new target
-        :param suppress_sync: suppress syncing the translated pages
-
-        """
-        super().move(target, pos)
-
-        if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
-            site = self.get_site()
-            lang_settings = SiteLanguages.for_site(site)
-            is_default = lang_settings.default_language == self.language
-        else:
-            is_default = self.language.is_default
-
-        if not suppress_sync and get_wagtailtrans_setting('SYNC_TREE') and is_default:
-            self.move_translated_pages(canonical_target=target, pos=pos)
-
-    def move_translated_pages(self, canonical_target, pos=None):
-        """Move only the translated pages of this instance (not self).
-
-        This is only called when WAGTAILTRANS_SYNC_TREE is enabled
-
-        :param canonical_target: Parent of the canonical page
-        :param pos: position
-
-        """
-        translations = self.get_translations(only_live=False)
-        if getattr(canonical_target, 'canonical_page', False):
-            canonical_target = canonical_target.canonical_page
-
-        for page in translations:
-            # get target because at this point we assume the tree is in sync.
-            target = TranslatablePage.objects.filter(
-                Q(language=page.language),
-                Q(canonical_page=canonical_target) | Q(pk=canonical_target.pk)
-            ).get()
-
-            page.move(target=target, pos=pos, suppress_sync=True)
-
-    def get_translations(self, only_live=True, include_self=False):
-        """Get all translations of this page.
-
-        This page itself is not included in the result, all pages
-        are sorted by the language position.
-
-        :param only_live: Boolean to filter on live pages & languages.
-        :return: TranslatablePage instance
-
-        """
-        canonical_page_id = self.canonical_page_id or self.pk
-        translations = TranslatablePage.objects.filter(Q(canonical_page=canonical_page_id) | Q(pk=canonical_page_id))
-
-        if not include_self:
-            translations = translations.exclude(pk=self.pk)
-
-        if only_live:
-            translations = translations.live().filter(language__live=True)
-
-        return translations
 
     def has_translation(self, language):
         """Check if page isn't already translated in given language.
@@ -242,19 +201,7 @@ class TranslatablePage(Page):
         :return: Boolean
 
         """
-        return language.pages.filter(canonical_page=self).exists()
-
-    def get_translation_parent(self, language):
-        site = self.get_site()
-        if not language.has_pages_in_site(site):
-            return site.root_page
-
-        translation_parent = (
-            TranslatablePage.objects
-            .filter(canonical_page=self.get_parent(), language=language, path__startswith=site.root_page.path)
-            .first()
-        )
-        return translation_parent
+        return TranslatablePageItem.objects.filter(canonical_page=self, language=language).exists()
 
     def create_translation(self, language, copy_fields=False, parent=None):
         """Create a translation for this page. If tree syncing is enabled the
@@ -280,9 +227,7 @@ class TranslatablePage(Page):
         update_attrs = {
             'title': self.title,
             'slug': slug,
-            'language': language,
             'live': False,
-            'canonical_page': self,
         }
 
         if copy_fields:
@@ -296,15 +241,122 @@ class TranslatablePage(Page):
             new_page = model_class(**update_attrs)
             parent.add_child(instance=new_page)
 
+        TranslatablePageItem.objects.create(
+            page=new_page,
+            canonical_page=self,
+            language=language,
+        )
+
         return new_page
 
-    @cached_property
-    def has_translations(self):
-        return self.translations.exists()
+    def move(self, target, pos=None, suppress_sync=False):
+        """Move the page to another target.
 
-    @cached_property
-    def is_canonical(self):
-        return not self.canonical_page_id and self.has_translations
+        :param target: the new target to move the page to
+        :param pos: position of the page in the new target
+        :param suppress_sync: suppress syncing the translated pages
+
+        """
+        super().move(target, pos)
+
+        if self.language:
+            if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
+                site = self.get_site()
+                lang_settings = SiteLanguages.for_site(site)
+                is_default = lang_settings.default_language == self.language
+            else:
+                is_default = self.language.is_default
+
+            if not suppress_sync and get_wagtailtrans_setting('SYNC_TREE') and is_default:
+                self.move_translated_pages(canonical_target=target, pos=pos)
+
+    def move_translated_pages(self, canonical_target, pos=None):
+        """Move only the translated pages of this instance (not self).
+
+        This is only called when WAGTAILTRANS_SYNC_TREE is enabled
+
+        :param canonical_target: Parent of the canonical page
+        :param pos: position
+
+        """
+        translations = self.get_translations(only_live=False)
+
+        if canonical_target.translatable_page_item and getattr(canonical_target.translatable_page_item, 'canonical_page', False):
+            canonical_target = canonical_target.translatable_page_item.canonical_page
+
+        for page in translations:
+            # Get target because at this point we assume the tree is in sync.
+            target = TranslatablePageItem.objects.filter(
+                Q(language=page.language),
+                Q(canonical_page=canonical_target) | Q(page=canonical_target)
+            ).get()
+
+            page.move(target=target.page, pos=pos, suppress_sync=True)
+
+    def get_translatable_page_items(self, only_live=True, include_self=False):
+        """Get all translatable page items of this page.
+
+        :param only_live: Boolean to filter on live pages & languages.
+        :return: TranslatablePageItem instance
+
+        """
+        items = TranslatablePageItem.objects.filter(
+            Q(canonical_page=self) |
+            Q(page=self)
+        )
+
+        if not include_self:
+            items = items.exclude(page=self)
+
+        if only_live:
+            items = items.filter(page__live=True).filter(language__live=True)
+
+        return items
+
+    def get_translations(self, only_live=True, include_self=False):
+        """Get all translations of this page.
+
+        This page itself is not included in the result, all pages
+        are sorted by the language position.
+
+        :param only_live: Boolean to filter on live pages & languages.
+        :return: Page instance
+
+        """
+        items = self.get_translatable_page_items(only_live=only_live, include_self=include_self).values_list('page__pk', flat=True)
+        translations = Page.objects.filter(pk__in=items)
+
+        return translations
+
+    def get_translation_parent(self, language):
+        site = self.get_site()
+
+        if not language.has_pages_in_site(site) or not self.language:
+            return site.root_page
+
+        translation_parent = (
+            TranslatablePageItem.objects.filter(
+                page__path__startswith=site.root_page.path,
+                canonical_page=self.get_parent(),
+                language=language,
+            )
+            .first()
+        )
+
+        if translation_parent:
+            return translation_parent.page
+
+        return None
+
+
+class TranslatablePage(Page):
+
+    #: Defined with a unique name, to prevent field clashes..
+    translatable_page_ptr = models.OneToOneField(Page, parent_link=True, related_name='+', on_delete=models.CASCADE)
+
+    canonical_page = models.ForeignKey(
+        'self', related_name='translations', blank=True, null=True, on_delete=models.SET_NULL)
+    language = models.ForeignKey(Language, related_name='pages', on_delete=models.PROTECT, default=_language_default)
 
     class Meta:
         verbose_name = _('Translatable page')
@@ -335,18 +387,19 @@ class TranslatableSiteRootPage(Page):
     parent_page_types = ['wagtailcore.Page']
 
     def serve(self, request, *args, **kwargs):
-        """Serve TranslatablePage in the correct language
+        """Serve TranslatablePage in the correct language.
 
         :param request: request object
         :return: Http302 or Http404
 
         """
         language = get_user_language(request)
-        candidates = TranslatablePage.objects.live().specific().child_of(self)
+        root_pages = self.get_children().live()
+        candidates = TranslatablePageItem.objects.filter(page__in=root_pages, language=language)
         try:
-            translation = candidates.filter(language=language).get()
-            return redirect(translation.url)
-        except TranslatablePage.DoesNotExist:
+            translation = candidates.get()
+            return redirect(translation.page.url)
+        except TranslatablePageItem.DoesNotExist:
             raise Http404
 
 

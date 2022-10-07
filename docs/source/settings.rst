@@ -32,7 +32,7 @@ If set to ``False`` wagtailtrans will work with ``Freeform`` trees.
 
 If set to ``True`` wagtailtrans will allow you to define a default language and
 additional languages per site. This is mostly used in a ``multi site`` setup and
-allowes you to define the languages per site, this way they can differ for all
+allows you to define the languages per site, this way they can differ for all
 available sites.
 
 .. note::

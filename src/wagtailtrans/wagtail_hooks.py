@@ -7,9 +7,11 @@ from django.utils.translation import ugettext_lazy as _
 from wagtail.admin import widgets
 from wagtail.contrib.modeladmin.options import ModelAdmin, modeladmin_register
 from wagtail.core import hooks
+from wagtail.core.models import Page
 
+from wagtailtrans import signals
 from wagtailtrans.conf import get_wagtailtrans_setting
-from wagtailtrans.models import Language, TranslatablePage
+from wagtailtrans.models import Language, TranslatablePageItem
 from wagtailtrans.urls import translations
 
 
@@ -24,6 +26,33 @@ class LanguageModelAdmin(ModelAdmin):
 
 
 modeladmin_register(LanguageModelAdmin)
+
+
+@hooks.register('after_create_page')
+def synchronize_page_create(request, page):
+    if hasattr(page, 'create_translation'):
+        signals.synchronize_trees(page, created=True)
+
+
+@hooks.register('after_edit_page')
+def synchronize_page_edit(request, page):
+    if hasattr(page, 'create_translation'):
+        signals.synchronize_trees(page, created=False)
+
+
+@hooks.register('before_delete_page')
+def mark_translations_for_deletion(request, page):
+   if hasattr(page, 'is_canonical') and page.is_canonical:
+       # Cache pages to be deleted as all references are already deleted when
+       # after_delete_page is triggered
+       page._marked_for_deletion = True
+       page._translation_ids = list(page.get_translations(only_live=False).values_list('pk', flat=True))
+
+
+@hooks.register('after_delete_page')
+def synchronize_page_delete(request, page):
+    if getattr(page, '_marked_for_deletion', False):
+        Page.objects.filter(pk__in=page._translation_ids).delete()
 
 
 @hooks.register('register_admin_urls')
@@ -50,7 +79,7 @@ if not get_wagtailtrans_setting('SYNC_TREE'):
         if not hasattr(page, 'language'):
             return
 
-        if hasattr(page, 'canonical_page') and page.canonical_page:
+        if hasattr(page, 'translatable_page_item') and page.translatable_page_item.canonical_page:
             return
 
         yield widgets.ButtonWithDropdownFromHook(
@@ -72,7 +101,7 @@ if not get_wagtailtrans_setting('SYNC_TREE'):
 
         other_languages = set(Language.objects.live().exclude(pk=exclude_lang.pk).order_by('position'))
 
-        translations = page.get_translations(only_live=False).select_related('language')
+        translations = page.get_translatable_page_items(only_live=False).select_related('language')
         taken_languages = set(t.language for t in translations)
 
         translation_targets = other_languages - taken_languages
@@ -98,16 +127,16 @@ def hide_non_canonical_languages(parent_page, pages, request):
     if parent_page.depth > 1 and get_wagtailtrans_setting('HIDE_TRANSLATION_TREES'):
         return pages.filter(
             pk__in=(
-                TranslatablePage.objects
+                TranslatablePageItem.objects
                 .filter(canonical_page__isnull=True)
-                .values_list('pk', flat=True)
+                .values_list('page__pk', flat=True)
             )
         )
     return pages
 
 
 @hooks.register('register_page_listing_buttons')
-def edit_in_language_button(page, page_perms, is_parent=False):
+def edit_in_language_button(page, page_perms, is_parent=False, url=None):
     """Add ``Edit in`` button to the page explorer.
 
     When hiding all other translation except the canonical language, which is
@@ -140,15 +169,15 @@ def edit_in_language_items(page, page_perms, is_parent=False):
     """
     other_languages = (
         page.specific
-        .get_translations(only_live=False)
-        .exclude(pk=page.pk)
+        .get_translatable_page_items(only_live=False)
+        .select_related('page')
         .select_related('language')
         .order_by('language__position')
     )
 
     for prio, language_page in enumerate(other_languages):
-        edit_url = reverse('wagtailadmin_pages:edit', args=(language_page.pk,))
-        return_page = language_page.canonical_page or language_page
+        edit_url = reverse('wagtailadmin_pages:edit', args=(language_page.page.pk,))
+        return_page = language_page.canonical_page or language_page.page
         next_url = reverse('wagtailadmin_explore', args=(return_page.get_parent().pk,))
 
         yield widgets.Button(

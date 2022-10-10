@@ -159,7 +159,7 @@ def edit_in_language_button(page, page_perms, is_parent=False, url=None):
 
 
 @hooks.register('wagtailtrans_dropdown_edit_hook')
-def edit_in_language_items(page, page_perms, is_parent=False):
+def edit_in_language_items(page, page_perms, is_parent=False, **kwargs):
     """Add all other languages in the ``Edit in`` dropdown.
 
     All languages other than the canonical language are listed as dropdown

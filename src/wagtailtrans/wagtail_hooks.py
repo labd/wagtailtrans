@@ -1,4 +1,5 @@
-from django.conf.urls import include, url
+from django.conf.urls import include
+from django.urls import re_path
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.encoding import force_str
@@ -58,7 +59,7 @@ def synchronize_page_delete(request, page):
 @hooks.register('register_admin_urls')
 def register_admin_urls():
     return [
-        url(r'^translate/', include(translations, namespace='wagtailtrans_translations')),
+        re_path(r'^translate/', include(translations, namespace='wagtailtrans_translations')),
     ]
 
 

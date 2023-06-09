@@ -7,15 +7,15 @@ from django.db import models
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import redirect
-from django.utils.encoding import force_text
+from django.utils.encoding import force_str
 from django.utils.functional import cached_property
 from django.utils.translation import activate
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from wagtail.admin.edit_handlers import FieldPanel, MultiFieldPanel, PageChooserPanel
 from wagtail.admin.forms import WagtailAdminModelForm, WagtailAdminPageForm
 from wagtail.contrib.settings.models import BaseSetting
 from wagtail.contrib.settings.registry import register_setting
-from wagtail.core.models import Page
+from wagtail.core.models import Page, Site
 from wagtail.search.index import FilterField
 
 from .conf import get_wagtailtrans_setting
@@ -107,7 +107,7 @@ class Language(models.Model):
         verbose_name_plural = _('Languages')
 
     def __str__(self):
-        return force_text(dict(settings.LANGUAGES).get(self.code))
+        return force_str(dict(settings.LANGUAGES).get(self.code))
 
     def has_pages_in_site(self, site):
         return self.pages.filter(path__startswith=site.root_page.path).exists()
@@ -172,7 +172,7 @@ class TranslatablePage(Page):
         activate(self.language.code)
         return super().serve(request, *args, **kwargs)
 
-    def move(self, target, pos=None, suppress_sync=False):
+    def move(self, target, pos=None, suppress_sync=False, *args, **kwargs):
         """Move the page to another target.
 
         :param target: the new target to move the page to
@@ -180,7 +180,7 @@ class TranslatablePage(Page):
         :param suppress_sync: suppress syncing the translated pages
 
         """
-        super().move(target, pos)
+        super().move(target, pos, *args, **kwargs)
 
         if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
             site = self.get_site()
@@ -322,7 +322,14 @@ def get_user_language(request):
         language = Language.objects.live().filter(code=request.LANGUAGE_CODE).first()
         if language:
             return language
-    return Language.objects.default_for_site(site=request.site)
+
+    # Backwards-compatible lookup for the deprecation of Wagtails SiteMiddleware per 2.9
+    if 'wagtail.core.middleware.SiteMiddleware' in settings.MIDDLEWARE:
+        site = request.site
+    else:
+        site = Site.find_for_request(request)
+
+    return Language.objects.default_for_site(site=site)
 
 
 class TranslatableSiteRootPage(Page):

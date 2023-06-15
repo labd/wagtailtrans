@@ -136,7 +136,7 @@ def hide_non_canonical_languages(parent_page, pages, request):
 
 
 @hooks.register('register_page_listing_buttons')
-def edit_in_language_button(page, page_perms, url=None):
+def edit_in_language_button(page, page_perms, url=None, **kwargs):
     """Add ``Edit in`` button to the page explorer.
 
     When hiding all other translation except the canonical language, which is

@@ -76,7 +76,7 @@ if not get_wagtailtrans_setting('SYNC_TREE'):
     """Only load hooks when WAGTAILTRANS_SYNC_TREE is disabled"""
 
     @hooks.register('register_page_listing_buttons')
-    def page_translations_menu(page, page_perms):
+    def page_translations_menu(page, page_perms, **kwargs):
         if not hasattr(page, 'language'):
             return
 

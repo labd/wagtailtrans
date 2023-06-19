@@ -15,7 +15,7 @@ from wagtail.admin.edit_handlers import FieldPanel, MultiFieldPanel, PageChooser
 from wagtail.admin.forms import WagtailAdminModelForm, WagtailAdminPageForm
 from wagtail.contrib.settings.models import BaseSetting
 from wagtail.contrib.settings.registry import register_setting
-from wagtail.core.models import Page
+from wagtail.core.models import Page, Site
 from wagtail.search.index import FilterField
 
 from .conf import get_wagtailtrans_setting
@@ -193,6 +193,73 @@ class TranslatablePageMixin:
 
     def get_admin_display_title(self):
         return "{} ({})".format(super().get_admin_display_title(), self.language)
+
+    def serve(self, request, *args, **kwargs):
+        activate(self.language.code)
+        return super().serve(request, *args, **kwargs)
+
+    def move(self, target, pos=None, suppress_sync=False, *args, **kwargs):
+        """Move the page to another target.
+
+        :param target: the new target to move the page to
+        :param pos: position of the page in the new target
+        :param suppress_sync: suppress syncing the translated pages
+
+        """
+        super().move(target, pos, *args, **kwargs)
+
+        if get_wagtailtrans_setting('LANGUAGES_PER_SITE'):
+            site = self.get_site()
+            lang_settings = SiteLanguages.for_site(site)
+            is_default = lang_settings.default_language == self.language
+        else:
+            is_default = self.language.is_default
+
+        if not suppress_sync and get_wagtailtrans_setting('SYNC_TREE') and is_default:
+            self.move_translated_pages(canonical_target=target, pos=pos)
+
+    def move_translated_pages(self, canonical_target, pos=None):
+        """Move only the translated pages of this instance (not self).
+
+        This is only called when WAGTAILTRANS_SYNC_TREE is enabled
+
+        :param canonical_target: Parent of the canonical page
+        :param pos: position
+
+        """
+        translations = self.get_translations(only_live=False)
+        if getattr(canonical_target, 'canonical_page', False):
+            canonical_target = canonical_target.canonical_page
+
+        for page in translations:
+            # get target because at this point we assume the tree is in sync.
+            target = TranslatablePage.objects.filter(
+                Q(language=page.language),
+                Q(canonical_page=canonical_target) | Q(pk=canonical_target.pk)
+            ).get()
+
+            page.move(target=target, pos=pos, suppress_sync=True)
+
+    def get_translations(self, only_live=True, include_self=False):
+        """Get all translations of this page.
+
+        This page itself is not included in the result, all pages
+        are sorted by the language position.
+
+        :param only_live: Boolean to filter on live pages & languages.
+        :return: TranslatablePage instance
+
+        """
+        canonical_page_id = self.canonical_page_id or self.pk
+        translations = TranslatablePage.objects.filter(Q(canonical_page=canonical_page_id) | Q(pk=canonical_page_id))
+
+        if not include_self:
+            translations = translations.exclude(pk=self.pk)
+
+        if only_live:
+            translations = translations.live().filter(language__live=True)
+
+        return translations
 
     def has_translation(self, language):
         """Check if page isn't already translated in given language.
@@ -374,7 +441,14 @@ def get_user_language(request):
         language = Language.objects.live().filter(code=request.LANGUAGE_CODE).first()
         if language:
             return language
-    return Language.objects.default_for_site(site=request.site)
+
+    # Backwards-compatible lookup for the deprecation of Wagtails SiteMiddleware per 2.9
+    if 'wagtail.core.middleware.SiteMiddleware' in settings.MIDDLEWARE:
+        site = request.site
+    else:
+        site = Site.find_for_request(request)
+
+    return Language.objects.default_for_site(site=site)
 
 
 class TranslatableSiteRootPage(Page):

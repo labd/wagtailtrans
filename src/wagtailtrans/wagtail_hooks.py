@@ -99,7 +99,7 @@ if not get_wagtailtrans_setting('SYNC_TREE'):
         if hasattr(page, 'language') and page.language:
             exclude_lang = page.language
 
-        other_languages = set(Language.objects.live().exclude(pk=exclude_lang.pk).order_by('position'))
+        other_languages = set(Language.objects.exclude(pk=exclude_lang.pk).order_by('position'))
 
         translations = page.get_translatable_page_items(only_live=False).select_related('language')
         taken_languages = set(t.language for t in translations)
@@ -158,7 +158,7 @@ def edit_in_language_button(page, page_perms, url=None, **kwargs):
 
 
 @hooks.register('wagtailtrans_dropdown_edit_hook')
-def edit_in_language_items(page, page_perms, *args, **kwargs):
+def edit_in_language_items(page, page_perms, is_parent=False, **kwargs):
     """Add all other languages in the ``Edit in`` dropdown.
 
     All languages other than the canonical language are listed as dropdown

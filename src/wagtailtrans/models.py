@@ -349,7 +349,7 @@ class TranslatablePageMixin:
         return None
 
 
-class TranslatablePage(Page):
+class TranslatablePage(TranslatablePageMixin, Page):
 
     #: Defined with a unique name, to prevent field clashes..
     translatable_page_ptr = models.OneToOneField(Page, parent_link=True, related_name='+', on_delete=models.CASCADE)

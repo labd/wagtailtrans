@@ -7,8 +7,8 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import widgets
 from wagtail.contrib.modeladmin.options import ModelAdmin, modeladmin_register
-from wagtail.core import hooks
-from wagtail.core.models import Page
+from wagtail import hooks
+from wagtail.models import Page
 
 from wagtailtrans import signals
 from wagtailtrans.conf import get_wagtailtrans_setting
@@ -136,7 +136,7 @@ def hide_non_canonical_languages(parent_page, pages, request):
 
 
 @hooks.register('register_page_listing_buttons')
-def edit_in_language_button(page, page_perms, url=None, **kwargs):
+def edit_in_language_button(page, page_perms=None, url=None, user=None, **kwargs):
     """Add ``Edit in`` button to the page explorer.
 
     When hiding all other translation except the canonical language, which is
@@ -152,13 +152,14 @@ def edit_in_language_button(page, page_perms, url=None, **kwargs):
         _("Edit in"),
         hook_name='wagtailtrans_dropdown_edit_hook',
         page=page,
+        user=user,
         page_perms=page_perms,
         priority=10
     )
 
 
 @hooks.register('wagtailtrans_dropdown_edit_hook')
-def edit_in_language_items(page, page_perms, *args, **kwargs):
+def edit_in_language_items(page, page_perms=None, *args, **kwargs):
     """Add all other languages in the ``Edit in`` dropdown.
 
     All languages other than the canonical language are listed as dropdown

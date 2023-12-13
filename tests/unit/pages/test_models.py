@@ -1,6 +1,6 @@
 import pytest
 from django.http import HttpRequest
-from wagtail.core.models import Site
+from wagtail.models import Site
 
 
 @pytest.mark.django_db

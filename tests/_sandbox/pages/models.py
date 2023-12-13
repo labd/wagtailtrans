@@ -1,13 +1,12 @@
 from django.db import models
-from wagtail.admin.edit_handlers import FieldPanel
-from wagtail.core.fields import RichTextField
-from wagtail.core.models import Page
-from wagtail.images.edit_handlers import ImageChooserPanel
+from wagtail.admin.panels import FieldPanel
+from wagtail.fields import RichTextField
+from wagtail.models import Page
 
-from wagtailtrans.models import TranslatablePage
+from wagtailtrans.models import TranslatablePage, TranslatablePageMixin
 
 
-class HomePage(TranslatablePage):
+class HomePage(TranslatablePageMixin, TranslatablePage):
     """An implementation of TranslatablePage."""
 
     subtitle = models.CharField(max_length=255, help_text="A required field, for test purposes")
@@ -18,7 +17,7 @@ class HomePage(TranslatablePage):
     content_panels = Page.content_panels + [
         FieldPanel('subtitle'),
         FieldPanel('body'),
-        ImageChooserPanel('image')
+        FieldPanel('image')
     ]
 
     subpage_types = ['HomePage']

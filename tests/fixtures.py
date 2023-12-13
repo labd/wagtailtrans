@@ -1,5 +1,5 @@
 import pytest
-from wagtail.core.models import Page, Site
+from wagtail.models import Page, Site
 
 from tests._sandbox.pages.models import HomePage
 from tests.factories.requests import RequestFactory
